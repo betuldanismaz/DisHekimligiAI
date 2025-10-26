@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import os
 import tkinter as tk
 from tkinter import scrolledtext, simpledialog
@@ -112,3 +113,8 @@ if __name__ == "__main__":
         print("Gemini model başlatılamadı. Lütfen API anahtarınızı kontrol edin.")
 
         
+=======
+import streamlit as st
+
+st.write("Hello")
+>>>>>>> 92cdd3cccb8bf69ffd08e8f25001ff122ce30638

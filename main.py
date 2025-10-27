@@ -1,7 +1,8 @@
+<<<<<<< HEAD
 import os
 import tkinter as tk
 from tkinter import scrolledtext, simpledialog
-from google import genai
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # .env dosyasını yükle ve ortam değişkenlerini ayarla
@@ -11,18 +12,18 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 # --- Gemini Kurulumu ve İstemci Oluşturma ---
 if API_KEY:
     try:
-        client = genai.Client(api_key=API_KEY)
+        genai.configure(api_key=API_KEY)
         
-        # Sohbet geçmişini korumak için bir Chat nesnesi başlat
-        # gemini-2.5-flash hem hızlı hem de chat için uygun bir modeldir.
-        chat_model = client.chats.create(model="gemini-2.5-flash")
+        # GenerativeModel oluştur
+        # gemini-1.5-flash hem hızlı hem de chat için uygun bir modeldir.
+        chat_model = genai.GenerativeModel('gemini-1.5-flash')
         
     except Exception as e:
         # Anahtar geçersizse veya bağlantı hatası varsa
         print(f"Gemini istemcisi başlatılamadı: {e}")
-        client = None # İstemciyi None olarak ayarla
+        chat_model = None # Modeli None olarak ayarla
 else:
-    client = None
+    chat_model = None
     print("Hata: GEMINI_API_KEY bulunamadı. Lütfen .env dosyanızı kontrol edin.")
     
 # --- Tkinter Uygulama Sınıfı ---
@@ -81,7 +82,7 @@ class ChatApp:
         
         try:
             # Gemini'a mesajı gönder
-            response = self.chat_model.send_message(user_text)
+            response = self.chat_model.generate_content(user_text)
             
             # "Yazıyor..." mesajını sil
             self.chat_history.config(state='normal')
@@ -104,7 +105,16 @@ class ChatApp:
             
 # --- Uygulamayı Başlatma ---
 if __name__ == "__main__":
-    if client:
+    if chat_model:
         root = tk.Tk()
         app = ChatApp(root, chat_model)
         root.mainloop()
+    else:
+        print("Gemini model başlatılamadı. Lütfen API anahtarınızı kontrol edin.")
+
+        
+=======
+import streamlit as st
+
+st.write("Hello")
+>>>>>>> 92cdd3cccb8bf69ffd08e8f25001ff122ce30638

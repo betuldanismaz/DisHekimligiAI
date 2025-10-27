@@ -38,5 +38,8 @@
   ],
   "dogru_tani": "Oral liken planus",
   "ayirici_tanilar": ["Oral kandidiyaz", "Lökoplaki", "Pemfigus vulgaris"],
-  "dogru_tedavi_plani": ["Topikal kortikosteroid tedavisi", "Oral hijyen eğitimi"]
+  "dogru_tedavi_plani": [
+    "Topikal kortikosteroid tedavisi",
+    "Oral hijyen eğitimi"
+  ]
 }

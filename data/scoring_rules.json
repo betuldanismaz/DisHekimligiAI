@@ -1,0 +1,12 @@
+[
+  {
+    "case_id": "olp_001", 
+    "rules": [  
+        {
+            "target_action": "check_allergies_meds", 
+            "score": 15,
+            "rule_outcome": "Anamnez tamamlandı."
+        }
+    ]
+  }
+]

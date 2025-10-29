@@ -1,0 +1,33 @@
+# Byte-code
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+venv/
+myenv/
+.venv/
+env/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE / Editor klasörleri
+.vscode/
+.idea/
+
+# Test ve kod kapsamı raporları
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build ve dağıtım dosyaları
+build/
+dist/
+*.egg-info/
+
+# Log dosyaları
+*.log

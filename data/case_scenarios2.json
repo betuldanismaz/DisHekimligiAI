@@ -1,0 +1,42 @@
+{
+  "id": "olp_001",
+  "zorluk_seviyesi": "Orta",
+  "hasta_profili": {
+    "yas": 45,
+    "sikayet": "Ağzımda beyaz çizgiler ve acı hissediyorum",
+    "tibbi_gecmis": ["Hipertansiyon (ACE inhibitörü)"],
+    "sosyal_gecmis": ["Sigara içmiyor", "Alkol kullanmıyor"]
+  },
+  "gizli_bulgular": [
+    {
+      "bulgu_id": "bulgu_001",
+      "tanim": "Bilateral bukkal mukozada retikular beyaz çizgiler (Wickham striae)",
+      "gorsel_id": "olp_foto_001.jpg"
+    },
+    {
+      "bulgu_id": "bulgu_002",
+      "tanim": "Dil lateral kenarlarında eroziv alanlar"
+    }
+  ],
+  "beklenen_eylemler": [
+    {
+      "eylem_id": "eylem_001",
+      "tanim": "Tıbbi geçmişin sorgulanması",
+      "puan": 10
+    },
+    {
+      "eylem_id": "eylem_002",
+      "tanim": "İlaç kullanımının sorgulanması (ACE inhibitörü)",
+      "puan": 15
+    },
+    {
+      "eylem_id": "eylem_003",
+      "tanim": "Oral mukozanın muayenesi",
+      "puan": 20,
+      "acilacak_bulgular": ["bulgu_001", "bulgu_002"]
+    }
+  ],
+  "dogru_tani": "Oral liken planus",
+  "ayirici_tanilar": ["Oral kandidiyaz", "Lökoplaki", "Pemfigus vulgaris"],
+  "dogru_tedavi_plani": ["Topikal kortikosteroid tedavisi", "Oral hijyen eğitimi"]
+}

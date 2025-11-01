@@ -1,4 +1,3 @@
-# ...existing code...
 import os
 import json
 import logging
@@ -27,36 +26,100 @@ DEFAULT_MODEL = "gemini-2.5-flash"
 MODEL_LOOKUP_LIMIT = 20
 
 
+def _configure_genai(api_key: Optional[str]) -> Tuple[bool, Optional[str]]:
+    if genai is None:
+        return False, "google-generativeai yüklenmemiş."
+    if not api_key:
+        return False, "GEMINI_API_KEY yok."
+    try:
+        # bazı SDK sürümlerinde configure, bazılarında farklı olabilir
+        if hasattr(genai, "configure"):
+            genai.configure(api_key=api_key)
+        elif hasattr(genai, "Client"):
+            # örnek alternatif yapı
+            genai.Client(api_key=api_key)
+        return True, None
+    except Exception as e:
+        LOGGER.exception("genai configure hata: %s", e)
+        return False, str(e)
+
+
 def list_available_models(api_key: Optional[str]) -> List[str]:
     if not api_key or genai is None:
         return []
-    try:
-        genai.configure(api_key=api_key)
-        models = genai.list_models() or []
-        names: List[str] = []
-        for m in models:
-            if isinstance(m, dict) and "name" in m:
-                names.append(m["name"])
-            elif isinstance(m, str):
-                names.append(m)
-        # prefer gemini names first
-        gemini = [n for n in names if "gemini" in n]
-        return gemini + [n for n in names if n not in gemini]
-    except Exception as e:
-        LOGGER.exception("list_available_models failed: %s", e)
+    ok, err = _configure_genai(api_key)
+    if not ok:
+        LOGGER.info("list_available_models configure failed: %s", err)
         return []
 
-
-def initialize_direct_model(api_key: Optional[str], model_name: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
-    """Initialize a direct genai model instance (fallback if agent not used)."""
-    if genai is None:
-        return None, "google-generativeai kütüphanesi yüklenmemiş."
-    if not api_key:
-        return None, "GEMINI_API_KEY bulunamadı. .env dosyanızı kontrol edin."
+    names: List[str] = []
     try:
-        genai.configure(api_key=api_key)
+        # Denenecek olası listeleme fonksiyonları
+        if hasattr(genai, "list_models"):
+            raw = genai.list_models()
+        elif hasattr(genai, "models") and hasattr(genai.models, "list"):
+            raw = genai.models.list()
+        elif hasattr(genai, "Model") and hasattr(genai.Model, "list"):
+            raw = genai.Model.list()
+        else:
+            raw = []
+
+        if not raw:
+            return []
+
+        for m in raw:
+            if isinstance(m, dict) and "name" in m:
+                names.append(m["name"])
+            elif hasattr(m, "name"):
+                names.append(getattr(m, "name"))
+            elif isinstance(m, str):
+                names.append(m)
     except Exception as e:
-        return None, f"API anahtarı ile yapılandırma başarısız: {e}"
+        LOGGER.exception("list_available_models hata: %s", e)
+
+    gemini = [n for n in names if "gemini" in n.lower()]
+    return gemini + [n for n in names if n not in gemini]
+
+
+class DirectModelWrapper:
+    """Wrap farklı genai SDK entrypoints behind a .generate(text) method."""
+    def __init__(self, api_key: str, model_name: str):
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def generate(self, prompt: str) -> Any:
+        # assume genai.configure already called by caller
+        # Try common call patterns
+        try:
+            if hasattr(genai, "generate_content"):
+                return genai.generate_content(model=self.model_name, prompt=prompt)
+            if hasattr(genai, "generate") and callable(genai.generate):
+                return genai.generate(model=self.model_name, input=prompt)
+            # older style
+            if hasattr(genai, "completion") and hasattr(genai.completion, "create"):
+                return genai.completion.create(model=self.model_name, prompt=prompt)
+            # fallback: attempt class-based
+            if hasattr(genai, "GenerativeModel"):
+                m = genai.GenerativeModel(self.model_name)
+                if hasattr(m, "generate_content"):
+                    return m.generate_content(prompt)
+                if hasattr(m, "generate"):
+                    return m.generate(prompt)
+        except Exception as e:
+            LOGGER.exception("DirectModelWrapper.generate hata: %s", e)
+            raise
+        raise RuntimeError("Uygun generative çağrısı bulunamadı SDK içinde.")
+
+
+def initialize_direct_model(api_key: Optional[str], model_name: Optional[str]) -> Tuple[Optional[DirectModelWrapper], Optional[str]]:
+    if genai is None:
+        return None, "google-generativeai yüklenmemiş."
+    if not api_key:
+        return None, "GEMINI_API_KEY bulunamadı."
+
+    ok, err = _configure_genai(api_key)
+    if not ok:
+        return None, f"genai yapılandırılamadı: {err}"
 
     available = list_available_models(api_key)
     if model_name and available and model_name not in available:
@@ -69,12 +132,13 @@ def initialize_direct_model(api_key: Optional[str], model_name: Optional[str]) -
     if not model_name:
         model_name = DEFAULT_MODEL
 
+    # Return wrapper that exposes .generate(prompt)
     try:
-        model = genai.GenerativeModel(model_name)
-        return model, None
+        wrapper = DirectModelWrapper(api_key=api_key, model_name=model_name)
+        # quick smoke call is optional; skip to avoid extra billing — rely on later calls and error handling
+        return wrapper, None
     except Exception as e:
-        avail_msg = f" Kullanılabilir modeller: {', '.join(available[:MODEL_LOOKUP_LIMIT])}" if available else ""
-        return None, f"Model başlatılamadı ({model_name}): {e}.{avail_msg}"
+        return None, f"Model başlatılamadı ({model_name}): {e}"
 
 
 def _safe_extract_text(response: Any) -> str:
@@ -179,49 +243,72 @@ def main() -> None:
 
     # input handling
     if prompt := st.chat_input("Oral patoloji hakkında soru sorun..."):
+        # Always save & show the user's message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            placeholder.markdown("✍️ Yazıyor...")
+        # Basit selamlaşma tespiti (kısa ve tek kelime/ifade)
+        greetings = {
+            "merhaba", "selam", "selamlar", "hi", "hello", "sa", "hey",
+            "günaydın", "iyi akşamlar", "iyi günler"
+        }
+        first_word = prompt.strip().split()[0].lower() if prompt.strip() else ""
+        is_greeting = first_word in greetings and len(prompt.strip()) <= 30
 
-            try:
-                # Prefer agent pipeline if available
-                if agent_instance:
-                    result = agent_instance.process_student_action(student_id="web_user_1", raw_action=prompt)
-                    full_text = result.get("final_feedback") or result.get("llm_interpretation", {}).get("explanatory_feedback", "")
-                    if not full_text:
-                        full_text = "(Agent yanıt üretmedi. Lütfen API anahtarını veya modeli kontrol edin.)"
-                    placeholder.markdown(full_text)
-                    st.session_state.messages.append({"role": "assistant", "content": full_text})
-                else:
-                    # Direct model fallback: build simple instruction
-                    recent = st.session_state.messages[-6:]
-                    conversation_text = "\n".join(
-                        f"{'Kullanıcı' if m['role']=='user' else 'Asistan'}: {m['content']}" for m in recent
-                    )
-                    instruction = (
-                        f"Önceki konuşma:\n{conversation_text}\n\n"
-                        f"Kullanıcı sorusu: {prompt}\n\n"
-                        "Kısa, profesyonel ve kaynaklı cevap verin. Eğer emin değilseniz konservatif bir yanıt verin."
-                    )
+        if is_greeting:
+            # Kısa, deterministik cevap: agent/model çağrısı yapmadan dön
+            reply = "Merhaba, sorunuz nedir?"
+            with st.chat_message("assistant"):
+                st.markdown(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+        else:
+            # Normal pipeline: agent veya doğrudan model
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                placeholder.markdown("✍️ Yazıyor...")
 
-                    resp = direct_model.generate_content(instruction)
-                    text = _safe_extract_text(resp) or ""
-                    if not text:
-                        text = "(Cevap alınamadı. Lütfen API anahtarını veya model erişimini kontrol edin.)"
-                    placeholder.markdown(text)
-                    st.session_state.messages.append({"role": "assistant", "content": text})
+                try:
+                    if agent_instance:
+                        result = agent_instance.process_student_action(student_id="web_user_1", raw_action=prompt)
+                        full_text = result.get("final_feedback") or result.get("llm_interpretation", {}).get("explanatory_feedback", "")
+                        if not full_text:
+                            full_text = "(Agent yanıt üretmedi. Lütfen API anahtarını veya modeli kontrol edin.)"
+                        placeholder.markdown(full_text)
+                        st.session_state.messages.append({"role": "assistant", "content": full_text})
+                    else:
+                        # Direct model fallback: oluşturulmuş wrapper'ın .generate veya SDK'nın yöntemlerini kullan
+                        recent = st.session_state.messages[-6:]
+                        conversation_text = "\n".join(
+                            f"{'Kullanıcı' if m['role']=='user' else 'Asistan'}: {m['content']}" for m in recent
+                        )
+                        instruction = (
+                            f"Önceki konuşma:\n{conversation_text}\n\n"
+                            f"Kullanıcı sorusu: {prompt}\n\n"
+                            "Kısa, profesyonel ve kaynaklı cevap verin. Eğer emin değilseniz konservatif bir yanıt verin."
+                        )
 
-            except Exception as e:
-                LOGGER.exception("chat handling failed: %s", e)
-                err_text = f"⚠️ Bir hata oluştu: {e}"
-                placeholder.markdown(err_text)
-                st.session_state.messages.append({"role": "assistant", "content": err_text})
+                        # Esnek çağrı: wrapper (generate) veya SDK (generate_content) desteklenir
+                        resp = None
+                        if hasattr(direct_model, "generate"):
+                            resp = direct_model.generate(instruction)
+                        elif hasattr(direct_model, "generate_content"):
+                            resp = direct_model.generate_content(instruction)
+                        elif genai is not None and hasattr(genai, "generate_content"):
+                            resp = genai.generate_content(model=st.session_state.selected_model, prompt=instruction)
+
+                        text = _safe_extract_text(resp) or ""
+                        if not text:
+                            text = "(Cevap alınamadı. Lütfen API anahtarını veya model erişimini kontrol edin.)"
+                        placeholder.markdown(text)
+                        st.session_state.messages.append({"role": "assistant", "content": text})
+
+                except Exception as e:
+                    LOGGER.exception("chat handling failed: %s", e)
+                    err_text = f"⚠️ Bir hata oluştu: {e}"
+                    placeholder.markdown(err_text)
+                    st.session_state.messages.append({"role": "assistant", "content": err_text})
 
 
 if __name__ == "__main__":
     main()
-# ...existing code...

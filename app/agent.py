@@ -20,6 +20,8 @@ from app.scenario_manager import ScenarioManager
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# Yeni: modül import edildiğinde terminalde görünmesi için kısa bir bilgi mesajı
+logger.info("app.agent imported - DentalEducationAgent module available")
 
 DENTAL_EDUCATOR_PROMPT = """
 You are a dental education assistant helping to interpret student actions within a simulated clinical scenario.

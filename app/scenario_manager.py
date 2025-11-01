@@ -111,3 +111,41 @@ class ScenarioManager:
                     state[k].extend(v)
                 else:
                     state[k] = v
+
+
+def load_scenarios_flex(path: str) -> List[Dict[str, Any]]:
+    """
+    Esnek senaryo yükleyici:
+    - Eğer dosya bir liste ise listeyi döndürür.
+    - Eğer dosya {'cases': [...]} ise 'cases' listesini döndürür.
+    - Eğer dosya tek bir vaka objesi ise [obj] olarak döndürür.
+    - Aksi halde boş liste döndürür ve bir uyarı loglar.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        LOGGER.exception("Senaryo dosyası açılamadı: %s", e)
+        return []
+
+    # Listeyse direkt döndür
+    if isinstance(raw, list):
+        return raw
+
+    # Sözlükse farklı anahtarları kontrol et
+    if isinstance(raw, dict):
+        # yaygın anahtar 'cases'
+        if "cases" in raw and isinstance(raw["cases"], list):
+            return raw["cases"]
+        # bazen 'data' veya 'scenarios' olabilir
+        for key in ("data", "scenarios", "items"):
+            if key in raw and isinstance(raw[key], list):
+                return raw[key]
+        # eğer dict tek vaka objesi ise onu listeye sar
+        # (ör: {"case_id": "...", ...})
+        # basit kontrol: varsa 'case_id' anahtarı tek vaka varsay
+        if "case_id" in raw or "id" in raw:
+            return [raw]
+
+    LOGGER.warning("Unexpected structure in %s; expected a list or a dict with 'cases' (found %s).", path, type(raw).__name__)
+    return []

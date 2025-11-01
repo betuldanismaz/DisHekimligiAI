@@ -1,4 +1,4 @@
-# Dental Education AI (DisHekimligiAI)
+# Dental Education AI 
 
 A dental education simulation system that uses Google's Gemini AI to provide interactive learning scenarios for dental students.
 

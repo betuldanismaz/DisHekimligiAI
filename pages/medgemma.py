@@ -39,18 +39,12 @@ with st.sidebar:
     
     scenario_type = st.radio(
         "Vaka Durumu:",
-        ["Mide Ülseri (NSAID Riski)", "Penisilin Alerjisi", "Diyabetik Hasta", "Hamilelik (1. Trimester)", "Oral Liken Planus"]
+        ["Penisilin Alerjisi", "Diyabetik Hasta", "Hamilelik (1. Trimester)", "Oral Liken Planus"]
     )
 
     # Seçilen senaryoya göre "Mock" (Taklit) Kurallar ve Bağlam
-    if scenario_type == "Mide Ülseri (NSAID Riski)":
-        context_summary = "Hasta 45 yaşında erkek. Şikayet: Diş ağrısı. Özgeçmiş: Aktif Peptik Ülser."
-        active_rules = {
-            "contraindications": ["Do NOT prescribe NSAIDs (Aspirin, Ibuprofen, Naproxen, etc.) due to ulcer history."],
-            "recommended_action": ["Prescribe Paracetamol (Acetaminophen) for pain relief."]
-        }
     
-    elif scenario_type == "Penisilin Alerjisi":
+    if scenario_type == "Penisilin Alerjisi":
         context_summary = "Hasta 12 yaşında kız çocuğu. Şikayet: Yüzde şişlik (Abse). Özgeçmiş: Penisilin anafilaksisi."
         active_rules = {
             "contraindications": ["Do NOT prescribe Penicillin-group antibiotics (Amoxicillin, Augmentin)."],

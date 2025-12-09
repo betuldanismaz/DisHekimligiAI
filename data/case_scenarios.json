@@ -41,16 +41,5 @@
   "dogru_tedavi_plani": [
     "Topikal kortikosteroid tedavisi",
     "Oral hijyen eğitimi"
-  ],
-  "cases": [
-    {
-      "id": "1",
-      "title": "Oral Ulcer",
-      "description": "Patient with ulcer on tongue...",
-      "rules": {
-        "contraindications": [],
-        "required_history": []
-      }
-    }
   ]
 }

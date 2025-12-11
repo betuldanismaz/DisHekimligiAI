@@ -52,7 +52,6 @@ def render_sidebar(
     result = {}
     
     with st.sidebar:
-        st.header("📚 Dental Tutor ")
         
         # Import and show profile card
         try:
@@ -61,7 +60,6 @@ def render_sidebar(
         except Exception as e:
             st.error(f"Profile yüklenemedi: {e}")
         
-        st.divider()
         
         # ==================== CASE SELECTOR ====================
         if show_case_selector:
@@ -166,7 +164,6 @@ def render_sidebar(
             if "messages" in st.session_state:
                 st.caption(f"**Mesaj Sayısı:** {len(st.session_state.messages)}")
         
-        st.divider()
         
         # ==================== LOGOUT ====================
         st.markdown("---")

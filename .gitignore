@@ -34,7 +34,6 @@ dist/
 
 # Database files
 dentai_app.db
-*.db
 
 # MD klasörü
 md/

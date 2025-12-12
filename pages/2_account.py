@@ -215,7 +215,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("""
     <div class="settings-section">
-        <h3>👤 Kişisel Bilgiler</h3>
+        <h3 style="color: #000080;">👤 Kişisel Bilgiler</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -229,7 +229,7 @@ with col1:
 with col2:
     st.markdown("""
     <div class="settings-section">
-        <h3>🔐 Güvenlik</h3>
+        <h3 style="color: #000080;" >🔐 Güvenlik</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -250,7 +250,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("""
     <div class="settings-section">
-        <h3>🔔 Bildirim Tercihleri</h3>
+        <h3 style="color: #000080;" >🔔 Bildirim Tercihleri</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -264,7 +264,7 @@ with col1:
 with col2:
     st.markdown("""
     <div class="settings-section">
-        <h3>🎨 Görünüm Ayarları</h3>
+        <h3 style="color: #000080;" >🎨 Görünüm Ayarları</h3>
     </div>
     """, unsafe_allow_html=True)
     

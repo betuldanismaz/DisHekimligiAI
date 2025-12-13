@@ -17,7 +17,8 @@ if parent_dir not in sys.path:
 
 from app.student_profile import init_student_profile
 from app.frontend.components import render_sidebar
-from db.database import SessionLocal, StudentSession, ChatLog, init_db
+from app.analytics_engine import analyze_performance, generate_report_text
+from db.database import get_student_detailed_history, init_db
 import json
 
 # Initialize systems
@@ -67,84 +68,12 @@ st.title("📊 Performans İstatistikleri")
 st.markdown("---")
 
 # ==================== LOAD DATA FROM DATABASE ====================
-def load_student_stats():
-    """Load statistics from database for current student."""
-    profile = st.session_state.get("student_profile") or {}
-    student_id = profile.get("student_id", "web_user_default")
-    
-    db = SessionLocal()
-    try:
-        # Get all sessions for this student
-        sessions = db.query(StudentSession).filter_by(student_id=student_id).all()
-        
-        if not sessions:
-            return {
-                "action_history": [],
-                "total_score": 0,
-                "total_actions": 0,
-                "completed_cases": set()
-            }
-        
-        action_history = []
-        total_score = 0
-        total_actions = 0
-        completed_cases = set()
-        
-        for session in sessions:
-            # Get chat logs for this session
-            logs = db.query(ChatLog).filter_by(
-                session_id=session.id,
-                role="assistant"  # Only assistant messages have evaluation metadata
-            ).all()
-            
-            for log in logs:
-                if log.metadata_json:
-                    try:
-                        metadata = log.metadata_json if isinstance(log.metadata_json, dict) else json.loads(log.metadata_json)
-                        
-                        # Extract action info
-                        interpreted_action = metadata.get("interpreted_action", "unknown")
-                        assessment = metadata.get("assessment", {})
-                        score = assessment.get("score", 0)
-                        outcome = assessment.get("rule_outcome", "N/A")
-                        
-                        # Only count if it's an ACTION (not CHAT)
-                        if interpreted_action and interpreted_action != "general_chat" and interpreted_action != "error":
-                            action_record = {
-                                "timestamp": log.timestamp.strftime("%Y-%m-%d %H:%M:%S") if log.timestamp else "N/A",
-                                "case_id": metadata.get("case_id", session.case_id),
-                                "action": interpreted_action,
-                                "score": score,
-                                "outcome": outcome
-                            }
-                            action_history.append(action_record)
-                            total_score += score
-                            total_actions += 1
-                            completed_cases.add(session.case_id)
-                    except Exception as e:
-                        st.error(f"Error parsing metadata: {e}")
-                        continue
-        
-        return {
-            "action_history": action_history,
-            "total_score": total_score,
-            "total_actions": total_actions,
-            "completed_cases": completed_cases
-        }
-    
-    except Exception as e:
-        st.error(f"Veritabanı hatası: {e}")
-        return {
-            "action_history": [],
-            "total_score": 0,
-            "total_actions": 0,
-            "completed_cases": set()
-        }
-    finally:
-        db.close()
+# Get student ID
+profile = st.session_state.get("student_profile") or {}
+student_id = profile.get("student_id", "web_user_default")
 
-# Load stats from database
-stats = load_student_stats()
+# Load stats from database using refactored function
+stats = get_student_detailed_history(student_id)
 action_history = stats["action_history"]
 total_score = stats["total_score"]
 total_actions = stats["total_actions"]
@@ -189,6 +118,38 @@ with col4:
     """, unsafe_allow_html=True)
 
 st.markdown("---")
+
+# ==================== WEAKNESS DETECTION ====================
+if action_history:
+    # Analyze performance
+    df = pd.DataFrame(action_history)
+    analysis = analyze_performance(df)
+    
+    # Display recommendation
+    if analysis.get('recommendation'):
+        st.markdown("## 💡 Gelişim Önerileri")
+        st.warning(analysis['recommendation'])
+        st.markdown("---")
+
+# ==================== DOWNLOAD REPORT BUTTON ====================
+if action_history:
+    col_download1, col_download2 = st.columns([3, 1])
+    
+    with col_download2:
+        # Generate report text
+        analysis_for_report = analyze_performance(pd.DataFrame(action_history)) if action_history else {}
+        report_text = generate_report_text(stats, analysis_for_report)
+        
+        st.download_button(
+            label="📄 Karneyi İndir",
+            data=report_text,
+            file_name=f"dental_tutor_karne_{student_id}_{datetime.now().strftime('%Y%m%d')}.txt",
+            mime="text/plain",
+            type="primary",
+            use_container_width=True
+        )
+    
+    st.markdown("---")
 
 # Action History
 if action_history:

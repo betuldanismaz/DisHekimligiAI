@@ -154,35 +154,51 @@ with col1:
     """)
 
 with col2:
-    st.markdown("## 📊 Platform İstatistikleri")
+    st.markdown("## 📊 Sizin İstatistikleriniz")
     
-    # Initialize session state for stats
-    if "total_actions" not in st.session_state:
-        st.session_state.total_actions = 0
-    if "total_score" not in st.session_state:
-        st.session_state.total_score = 0
-    if "completed_cases" not in st.session_state:
-        st.session_state.completed_cases = set()
+    # Get real user stats from database
+    if is_authenticated:
+        from db.database import get_user_stats
+        user_id = user_info.get("student_id", "web_user_default")
+        stats = get_user_stats(user_id)
+        
+        total_points = stats.get("total_points", 0)
+        total_solved = stats.get("total_solved", 0)
+        avg_score = stats.get("avg_score", 0)
+        user_level = stats.get("user_level", "Başlangıç")
+    else:
+        # Not logged in - show zeros
+        total_points = 0
+        total_solved = 0
+        avg_score = 0
+        user_level = "Giriş Yapın"
     
     # Display stats
     st.markdown(f"""
     <div class="stat-card">
-        <p class="stat-number">{st.session_state.total_score}</p>
+        <p class="stat-number">{total_points}</p>
         <p class="stat-label">Toplam Puan</p>
     </div>
     """, unsafe_allow_html=True)
     
     st.markdown(f"""
     <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-        <p class="stat-number">{len(st.session_state.completed_cases)}</p>
+        <p class="stat-number">{total_solved}</p>
         <p class="stat-label">Tamamlanan Vaka</p>
     </div>
     """, unsafe_allow_html=True)
     
     st.markdown(f"""
     <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-        <p class="stat-number">{st.session_state.total_actions}</p>
-        <p class="stat-label">Toplam Eylem</p>
+        <p class="stat-number">{avg_score}%</p>
+        <p class="stat-label">Ortalama Başarı</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(f"""
+    <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+        <p class="stat-number">{user_level}</p>
+        <p class="stat-label">Seviye</p>
     </div>
     """, unsafe_allow_html=True)
 

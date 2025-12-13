@@ -192,13 +192,44 @@ def main() -> None:
         st.session_state.db_session_id = None
         st.rerun()
     
+    def finish_case():
+        """Callback to finish case and save results"""
+        from db.database import save_exam_result, SessionLocal, StudentSession
+        
+        # Get current session score
+        if st.session_state.db_session_id:
+            db = SessionLocal()
+            try:
+                session = db.query(StudentSession).filter_by(id=st.session_state.db_session_id).first()
+                if session:
+                    # Save exam result
+                    profile = st.session_state.get("student_profile") or {}
+                    user_id = profile.get("student_id", "web_user_default")
+                    
+                    result = save_exam_result(
+                        user_id=user_id,
+                        case_id=st.session_state.current_case_id,
+                        score=int(session.current_score),
+                        max_score=100,  # You can adjust this based on case
+                        details={"session_id": session.id}
+                    )
+                    
+                    if result:
+                        st.session_state.case_completed = True
+                        st.success(f"✅ Vaka tamamlandı! Skorunuz: {int(session.current_score)} puan kaydedildi!")
+                    else:
+                        st.error("❌ Skor kaydedilemedi.")
+            finally:
+                db.close()
+    
     # Render reusable sidebar
     sidebar_data = render_sidebar(
         page_type="chat",
         show_case_selector=True,
         show_model_selector=True,
         custom_actions={
-            "🔄 Yeni Sohbet": reset_chat
+            "🔄 Yeni Sohbet": reset_chat,
+            "✅ Vakayı Bitir": finish_case
         }
     )
 

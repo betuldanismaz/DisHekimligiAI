@@ -74,6 +74,26 @@ class ChatLog(Base):
         return f"<ChatLog(id={self.id}, session_id={self.session_id}, role={self.role})>"
 
 
+class ExamResult(Base):
+    """
+    Sınav Sonuçları Tablosu
+    ------------------------
+    Öğrencilerin tamamlanan vaka sonuçlarını ve detaylı skorlarını saklar.
+    """
+    __tablename__ = "exam_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=False, index=True)  # Öğrenci kimliği
+    case_id = Column(String, nullable=False, index=True)  # Hangi vaka
+    score = Column(Integer, nullable=False)  # Elde edilen puan
+    max_score = Column(Integer, nullable=False)  # Maksimum olası puan
+    completed_at = Column(DateTime, default=datetime.datetime.utcnow)  # Tamamlanma zamanı
+    details_json = Column(Text, nullable=True)  # Detaylı breakdown (JSON string)
+
+    def __repr__(self):
+        return f"<ExamResult(id={self.id}, user={self.user_id}, case={self.case_id}, score={self.score}/{self.max_score})>"
+
+
 # ==================== VERİTABANI FONKSİYONLARI ====================
 
 def init_db():
@@ -147,6 +167,214 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Test sırasında hata: {e}")
         db.rollback()
+    finally:
+        db.close()
+
+
+# ==================== HELPER FUNCTIONS ====================
+
+def save_exam_result(user_id: str, case_id: str, score: int, max_score: int, details: dict = None):
+    """
+    Save completed exam result to database.
+    
+    Args:
+        user_id: Student identifier
+        case_id: Case identifier
+        score: Points earned
+        max_score: Maximum possible points
+        details: Additional breakdown info (optional)
+    
+    Returns:
+        ExamResult object or None if error
+    """
+    import json
+    
+    db = SessionLocal()
+    try:
+        result = ExamResult(
+            user_id=user_id,
+            case_id=case_id,
+            score=score,
+            max_score=max_score,
+            details_json=json.dumps(details) if details else None
+        )
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+        return result
+    except Exception as e:
+        print(f"Error saving exam result: {e}")
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def get_user_stats(user_id: str):
+    """
+    Get comprehensive statistics for a user.
+    
+    Args:
+        user_id: Student identifier
+    
+    Returns:
+        dict with keys:
+            - total_solved: Number of completed cases
+            - avg_score: Average score percentage
+            - user_level: Level based on performance
+            - total_points: Total points earned
+            - case_breakdown: List of individual case results
+    """
+    db = SessionLocal()
+    try:
+        # Get all exam results for this user
+        results = db.query(ExamResult).filter_by(user_id=user_id).all()
+        
+        if not results:
+            return {
+                "total_solved": 0,
+                "avg_score": 0,
+                "user_level": "Başlangıç",
+                "total_points": 0,
+                "case_breakdown": []
+            }
+        
+        # Calculate stats
+        total_solved = len(results)
+        total_points = sum(r.score for r in results)
+        total_max = sum(r.max_score for r in results)
+        avg_score = int((total_points / total_max * 100)) if total_max > 0 else 0
+        
+        # Determine user level
+        if avg_score >= 90:
+            user_level = "Uzman"
+        elif avg_score >= 75:
+            user_level = "İleri"
+        elif avg_score >= 60:
+            user_level = "Orta"
+        else:
+            user_level = "Başlangıç"
+        
+        # Case breakdown
+        case_breakdown = [
+            {
+                "case_id": r.case_id,
+                "score": r.score,
+                "max_score": r.max_score,
+                "percentage": int(r.score / r.max_score * 100) if r.max_score > 0 else 0,
+                "completed_at": r.completed_at.strftime("%Y-%m-%d %H:%M")
+            }
+            for r in results
+        ]
+        
+        return {
+            "total_solved": total_solved,
+            "avg_score": avg_score,
+            "user_level": user_level,
+            "total_points": total_points,
+            "case_breakdown": case_breakdown
+        }
+    
+    except Exception as e:
+        print(f"Error getting user stats: {e}")
+        return {
+            "total_solved": 0,
+            "avg_score": 0,
+            "user_level": "Başlangıç",
+            "total_points": 0,
+            "case_breakdown": []
+        }
+    finally:
+        db.close()
+
+
+def get_student_detailed_history(user_id: str):
+    """
+    Get detailed action history for a student for analytics.
+    This replaces the inline load_student_stats() logic in pages/5_stats.py.
+    
+    Args:
+        user_id: Student identifier
+    
+    Returns:
+        dict with keys:
+            - action_history: List of action records with timestamp, case_id, action, score, outcome
+            - total_score: Sum of all scores
+            - total_actions: Count of actions
+            - completed_cases: Set of unique case IDs
+    """
+    import json
+    
+    db = SessionLocal()
+    try:
+        # Get all sessions for this student
+        sessions = db.query(StudentSession).filter_by(student_id=user_id).all()
+        
+        if not sessions:
+            return {
+                "action_history": [],
+                "total_score": 0,
+                "total_actions": 0,
+                "completed_cases": set()
+            }
+        
+        action_history = []
+        total_score = 0
+        total_actions = 0
+        completed_cases = set()
+        
+        for session in sessions:
+            # Get chat logs for this session (only assistant messages have evaluation metadata)
+            logs = db.query(ChatLog).filter_by(
+                session_id=session.id,
+                role="assistant"
+            ).all()
+            
+            for log in logs:
+                if log.metadata_json:
+                    try:
+                        # Parse metadata
+                        metadata = log.metadata_json if isinstance(log.metadata_json, dict) else json.loads(log.metadata_json)
+                        
+                        # Extract action info
+                        interpreted_action = metadata.get("interpreted_action", "unknown")
+                        assessment = metadata.get("assessment", {})
+                        score = assessment.get("score", 0)
+                        outcome = assessment.get("rule_outcome", "N/A")
+                        
+                        # Only count if it's an ACTION (not general chat)
+                        if interpreted_action and interpreted_action not in ["general_chat", "error"]:
+                            action_record = {
+                                "timestamp": log.timestamp.strftime("%Y-%m-%d %H:%M:%S") if log.timestamp else "N/A",
+                                "case_id": metadata.get("case_id", session.case_id),
+                                "action": interpreted_action,
+                                "score": score,
+                                "outcome": outcome
+                            }
+                            action_history.append(action_record)
+                            total_score += score
+                            total_actions += 1
+                            completed_cases.add(session.case_id)
+                    
+                    except Exception as e:
+                        print(f"Error parsing metadata: {e}")
+                        continue
+        
+        return {
+            "action_history": action_history,
+            "total_score": total_score,
+            "total_actions": total_actions,
+            "completed_cases": completed_cases
+        }
+    
+    except Exception as e:
+        print(f"Database error in get_student_detailed_history: {e}")
+        return {
+            "action_history": [],
+            "total_score": 0,
+            "total_actions": 0,
+            "completed_cases": set()
+        }
     finally:
         db.close()
  

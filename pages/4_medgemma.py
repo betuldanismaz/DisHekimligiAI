@@ -117,7 +117,6 @@ if prompt := st.chat_input("Klinik kararınızı veya reçetenizi yazın..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    # 2. AI Cevabını Üret
     with st.chat_message("assistant"):
         with st.spinner("MedGemma kuralları denetliyor..."):
             

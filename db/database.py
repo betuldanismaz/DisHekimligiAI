@@ -6,6 +6,10 @@ Streamlit uygulaması için SQLite kullanır.
 """
 
 import datetime
+import os
+import sqlite3
+from urllib.parse import urlparse
+from typing import Optional
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -42,6 +46,8 @@ class StudentSession(Base):
     student_id = Column(String, nullable=False, index=True)  # Öğrenci kimliği
     case_id = Column(String, nullable=False)  # Hangi vaka üzerinde çalışıyor
     current_score = Column(Float, default=0.0)  # Anlık puan
+    # Simulation state (JSON string). Stores patient context, revealed findings, progress, etc.
+    state_json = Column(Text, default="{}")
     start_time = Column(DateTime, default=datetime.datetime.utcnow)  # Oturum başlangıç zamanı
 
     # İlişki: Bir oturumun birden fazla chat mesajı olabilir
@@ -102,6 +108,56 @@ def init_db():
     Uygulama ilk çalıştırıldığında çağrılmalı.
     """
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight SQLite "migration": ensure new columns exist on existing DBs.
+    # (SQLite's create_all does not alter existing tables.)
+    try:
+        _ensure_student_sessions_state_json_column()
+    except Exception as e:
+        # Don't hard-fail app startup; log for visibility.
+        print(f"⚠️ Failed to ensure state_json column exists: {e}")
+
+
+def _sqlite_db_file_path() -> Optional[str]:
+    """Resolve the SQLite file path from DATABASE_URL (sqlite:///./file.db)."""
+    try:
+        parsed = urlparse(DATABASE_URL)
+        if parsed.scheme != "sqlite":
+            return None
+
+        # sqlite:///./dentai_app.db -> path like /./dentai_app.db
+        path = parsed.path
+        if not path:
+            return None
+
+        # Strip leading '/' on Windows paths like '/./dentai_app.db'
+        while path.startswith("/"):
+            path = path[1:]
+
+        # DATABASE_URL is relative to project root in this repo.
+        return os.path.normpath(path)
+    except Exception:
+        return None
+
+
+def _ensure_student_sessions_state_json_column() -> None:
+    """Add student_sessions.state_json if missing (SQLite ALTER TABLE ADD COLUMN)."""
+    db_file = _sqlite_db_file_path()
+    if not db_file:
+        return
+
+    con = sqlite3.connect(db_file)
+    try:
+        cur = con.cursor()
+        cur.execute("PRAGMA table_info(student_sessions)")
+        cols = [r[1] for r in cur.fetchall()]
+        if "state_json" in cols:
+            return
+
+        cur.execute("ALTER TABLE student_sessions ADD COLUMN state_json TEXT DEFAULT '{}' ")
+        con.commit()
+    finally:
+        con.close()
 
 
 def get_db():

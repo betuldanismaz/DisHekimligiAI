@@ -7,8 +7,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Global in-memory store simulating a database
-_STUDENT_STATES: Dict[str, Dict[str, Any]] = {}
+from db.database import SessionLocal, StudentSession
 
 
 class ScenarioManager:
@@ -56,58 +55,187 @@ class ScenarioManager:
             logger.error("Failed to parse case scenarios JSON: %s", e)
             self.case_data = []
 
-    def get_state(self, student_id: str) -> Dict[str, Any]:
+    def _find_case(self, case_id: str) -> Dict[str, Any]:
+        if not case_id:
+            return {}
+        for c in self.case_data:
+            if isinstance(c, dict) and c.get("case_id") == case_id:
+                return c
+        return {}
+
+    def _build_initial_state(self, case_id: str) -> Dict[str, Any]:
+        case = self._find_case(case_id) or {}
+
+        state: Dict[str, Any] = {
+            "case_id": case_id,
+            "revealed_findings": [],
+            "history": [],
+        }
+
+        # Normalize patient fields (case_scenarios.json is primarily Turkish-keyed today)
+        patient: Dict[str, Any] = {}
+        hp = case.get("hasta_profili")
+        if isinstance(hp, dict):
+            if "yas" in hp:
+                patient["age"] = hp.get("yas")
+            if "sikayet" in hp:
+                patient["chief_complaint"] = hp.get("sikayet")
+            if "tibbi_gecmis" in hp:
+                patient["medical_history"] = hp.get("tibbi_gecmis")
+            if "sosyal_gecmis" in hp:
+                patient["social_history"] = hp.get("sosyal_gecmis")
+
+        # Back-compat: if the case uses the older English schema
+        if not patient and isinstance(case.get("patient"), dict):
+            patient = case.get("patient", {})
+
+        if patient:
+            state["patient"] = patient
+
+        if isinstance(case.get("name"), str):
+            state["case_name"] = case.get("name")
+        elif isinstance(case.get("dogru_tani"), str):
+            # Not a perfect name, but helps with context
+            state["case_name"] = case.get("dogru_tani")
+
+        if isinstance(case.get("zorluk_seviyesi"), str):
+            state["case_difficulty"] = case.get("zorluk_seviyesi")
+
+        return state
+
+    def get_state(self, student_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Retrieve (or initialize) the state for a student.
-        - If new, initialize with the first case's case_id (or default) and current_score=0.
+        Retrieve (or initialize) the persistent state for a student.
+
+        Selection rule:
+        - If case_id is provided, use the most recent StudentSession for (student_id, case_id).
+        - Else, use the most recent StudentSession for the student.
+
+        If no session exists, create one for the default case.
         """
-        if student_id not in _STUDENT_STATES:
-            # Determine initial case and optional patient info
-            first_case = self.case_data[0] if self.case_data else {}
-            case_id = first_case.get("case_id") or self._default_case_id
+        if not student_id:
+            return {}
 
-            initial_state: Dict[str, Any] = {
-                "case_id": case_id,
-                "current_score": 0,
-            }
-            # Optionally include common fields if available
-            if "patient" in first_case and isinstance(first_case["patient"], dict):
-                initial_state["patient"] = first_case["patient"]
-            if "name" in first_case and isinstance(first_case["name"], str):
-                initial_state["case_name"] = first_case["name"]
+        db = SessionLocal()
+        try:
+            query = db.query(StudentSession).filter(StudentSession.student_id == student_id)
+            if case_id:
+                query = query.filter(StudentSession.case_id == case_id)
 
-            _STUDENT_STATES[student_id] = initial_state
+            session = query.order_by(StudentSession.start_time.desc()).first()
 
-        return _STUDENT_STATES[student_id]
+            if not session:
+                # Create a new persistent session for the default case
+                chosen_case_id = case_id or self._default_case_id
+                initial_state = self._build_initial_state(chosen_case_id)
+                session = StudentSession(
+                    student_id=student_id,
+                    case_id=chosen_case_id,
+                    current_score=0.0,
+                    state_json=json.dumps(initial_state, ensure_ascii=False),
+                )
+                db.add(session)
+                db.commit()
+                db.refresh(session)
+                return initial_state
 
-    def update_state(self, student_id: str, updates: Dict[str, Any]) -> None:
+            # Load and validate state_json
+            raw = session.state_json or "{}"
+            try:
+                state = json.loads(raw) if isinstance(raw, str) else {}
+            except Exception:
+                logger.warning("Invalid state_json for student_id=%s session_id=%s; resetting.", student_id, session.id)
+                state = {}
+
+            if not isinstance(state, dict) or not state:
+                state = self._build_initial_state(session.case_id or (case_id or self._default_case_id))
+
+            # Ensure case_id is present and consistent
+            effective_case_id = case_id or session.case_id or state.get("case_id") or self._default_case_id
+            state["case_id"] = effective_case_id
+
+            # Keep DB score as the source of truth for score
+            state["current_score"] = session.current_score or 0.0
+
+            # Persist repaired/initialized state back if needed
+            if (session.state_json or "").strip() == "" or raw == "{}" or state.get("case_id") != session.case_id:
+                session.case_id = effective_case_id
+                session.state_json = json.dumps(state, ensure_ascii=False)
+                db.commit()
+
+            return state
+        finally:
+            db.close()
+
+    def update_state(self, student_id: str, updates: Dict[str, Any], case_id: Optional[str] = None) -> None:
         """
-        Apply updates from the assessment engine to the student's state.
-        - If 'score_change' is present and numeric, add it to 'current_score' (do not replace).
-        - Merge remaining keys into the student's state.
+        Apply updates from the assessment engine to the student's persistent state.
+
+        Behavior:
+        - Updates StudentSession.current_score additively when 'score_change' is numeric.
+        - Merges remaining keys into the state_json dict (shallow merge; list extends).
+        - Persists back to StudentSession.state_json.
         """
         if not isinstance(updates, dict):
             return
 
-        state = self.get_state(student_id)  # ensure initialized
+        if not student_id:
+            return
 
-        # Handle score change additively
-        score_delta = updates.get("score_change")
-        if isinstance(score_delta, (int, float)):
-            state["current_score"] = state.get("current_score", 0) + score_delta
+        db = SessionLocal()
+        try:
+            query = db.query(StudentSession).filter(StudentSession.student_id == student_id)
+            if case_id:
+                query = query.filter(StudentSession.case_id == case_id)
+            session = query.order_by(StudentSession.start_time.desc()).first()
 
-        # Merge other fields (avoid replacing current_score directly)
-        for k, v in updates.items():
-            if k in ("score_change", "current_score"):
-                continue
+            if not session:
+                # Ensure a session exists so we have a place to store state
+                _ = self.get_state(student_id, case_id=case_id)
+                session = db.query(StudentSession).filter(StudentSession.student_id == student_id)
+                if case_id:
+                    session = session.filter(StudentSession.case_id == case_id)
+                session = session.order_by(StudentSession.start_time.desc()).first()
+                if not session:
+                    return
 
-            if k not in state:
-                state[k] = v
-            else:
-                # Shallow merge for dicts; extend for lists; replace otherwise
-                if isinstance(state[k], dict) and isinstance(v, dict):
-                    state[k].update(v)
-                elif isinstance(state[k], list) and isinstance(v, list):
-                    state[k].extend(v)
-                else:
+            # Load current state
+            raw = session.state_json or "{}"
+            try:
+                state = json.loads(raw) if isinstance(raw, str) else {}
+            except Exception:
+                state = {}
+
+            if not isinstance(state, dict) or not state:
+                state = self._build_initial_state(session.case_id or (case_id or self._default_case_id))
+
+            # Apply score change to DB score (source of truth)
+            score_delta = updates.get("score_change")
+            if isinstance(score_delta, (int, float)):
+                session.current_score = (session.current_score or 0.0) + float(score_delta)
+                state["current_score"] = session.current_score
+
+            # Merge other fields into state_json
+            for k, v in updates.items():
+                if k in ("score_change",):
+                    continue
+
+                if k not in state:
                     state[k] = v
+                else:
+                    if isinstance(state[k], dict) and isinstance(v, dict):
+                        state[k].update(v)
+                    elif isinstance(state[k], list) and isinstance(v, list):
+                        state[k].extend(v)
+                    else:
+                        state[k] = v
+
+            # Ensure case_id
+            effective_case_id = case_id or session.case_id or state.get("case_id") or self._default_case_id
+            session.case_id = effective_case_id
+            state["case_id"] = effective_case_id
+
+            session.state_json = json.dumps(state, ensure_ascii=False)
+            db.commit()
+        finally:
+            db.close()

@@ -318,14 +318,16 @@ class DentalEducationAgent:
           "updated_state": dict
         }
         """
-        # Step 1: Get Context
-        state = self.scenario_manager.get_state(student_id) or {}
-        
+        # Step 1: Get Context (persistent)
+        # If case_id is provided, bind to that session/case so state is stored correctly.
+        state = self.scenario_manager.get_state(student_id, case_id=case_id) if case_id else self.scenario_manager.get_state(student_id)
+        state = state or {}
+
         # Use provided case_id or fallback to state
-        if case_id:
-            state["case_id"] = case_id
-        else:
+        if not case_id:
             case_id = state.get("case_id", "default_case")
+        else:
+            state["case_id"] = case_id
 
         # Step 2: Gemini Interpretation (Eğitim Asistanı)
         interpretation = self.interpret_action(raw_action, state)
@@ -342,19 +344,27 @@ class DentalEducationAgent:
         final_feedback = self._compose_final_feedback(interpretation, assessment)
 
         # Step 6: Update State
+        # Always propagate score_change (even when a rule has no state_updates).
+        score_delta = assessment.get("score_change")
         state_updates = (
             assessment.get("state_updates")
             or assessment.get("state_update")
             or assessment.get("new_state_data")
             or {}
         )
+        combined_updates: Dict[str, Any] = {}
+        if isinstance(score_delta, (int, float)) and score_delta:
+            combined_updates["score_change"] = score_delta
         if isinstance(state_updates, dict) and state_updates:
+            combined_updates.update(state_updates)
+
+        if combined_updates:
             try:
-                self.scenario_manager.update_state(student_id, state_updates)
+                self.scenario_manager.update_state(student_id, combined_updates, case_id=case_id)
             except Exception as e:
                 logger.exception("Failed to update scenario state: %s", e)
 
-        updated_state = self.scenario_manager.get_state(student_id) or state
+        updated_state = self.scenario_manager.get_state(student_id, case_id=case_id) or state
 
         return {
             "student_id": student_id,

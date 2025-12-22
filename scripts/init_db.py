@@ -6,9 +6,12 @@ Run this script when setting up the project for the first time.
 
 Usage:
     python scripts/init_db.py
+    python scripts/init_db.py --recreate
 """
 
+import os
 import sys
+import sqlite3
 from pathlib import Path
 
 # Add parent directory to path
@@ -26,6 +29,14 @@ def setup_database():
     print("=" * 60)
     
     try:
+        recreate = "--recreate" in sys.argv or os.getenv("DENTAI_RECREATE_DB") == "1"
+
+        # SQLite file lives at project root: ./dentai_app.db
+        db_path = project_root / "dentai_app.db"
+        if recreate and db_path.exists():
+            print("\n🧹 Recreate requested: deleting existing dentai_app.db...")
+            db_path.unlink()
+
         # Create all tables
         print("\n📦 Creating database tables...")
         init_db()
@@ -46,6 +57,26 @@ def setup_database():
             print(f"✅ Database connection OK (Sessions: {count})")
         finally:
             db.close()
+
+        # Verify schema includes state_json
+        if db_path.exists():
+            try:
+                con = sqlite3.connect(str(db_path))
+                cur = con.cursor()
+                cur.execute("PRAGMA table_info(student_sessions)")
+                cols = [r[1] for r in cur.fetchall()]  # (cid, name, type, notnull, dflt_value, pk)
+                con.close()
+
+                if "state_json" not in cols:
+                    print("\n⚠️  WARNING: student_sessions.state_json column is missing.")
+                    print("   SQLite cannot auto-migrate columns via create_all().")
+                    print("   Options:")
+                    print("   - Recreate DB: python scripts/init_db.py --recreate")
+                    print("   - Or delete dentai_app.db and rerun init_db")
+                else:
+                    print("✅ Schema OK: state_json column present")
+            except Exception as e:
+                print(f"\n⚠️  Could not verify schema via PRAGMA: {e}")
         
         print("\n" + "=" * 60)
         print("✅ DATABASE SETUP COMPLETE!")

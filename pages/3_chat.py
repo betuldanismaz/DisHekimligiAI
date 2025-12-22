@@ -151,18 +151,9 @@ def save_message_to_db(
             timestamp=datetime.utcnow()
         )
         db.add(chat_log)
-        
-        # Update session score if this is an assistant message with assessment
-        if role == "assistant" and metadata:
-            assessment = metadata.get("assessment", {})
-            action_score = assessment.get("score", 0)
-            
-            if action_score > 0:
-                # Get current session and update cumulative score
-                session = db.query(StudentSession).filter_by(id=session_id).first()
-                if session:
-                    session.current_score = (session.current_score or 0) + action_score
-                    LOGGER.info(f"Updated session {session_id} score: +{action_score} -> {session.current_score}")
+        # NOTE:
+        # Session score is now updated centrally by ScenarioManager (via agent.process_student_input).
+        # Avoid double-counting here.
         
         db.commit()
         return True

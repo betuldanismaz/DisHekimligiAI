@@ -10,6 +10,8 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 // API base URL from environment variable
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+console.log('🔌 API_URL Configured as:', API_URL); // Debug log
+
 // Create axios instance
 const apiClient: AxiosInstance = axios.create({
     baseURL: API_URL,

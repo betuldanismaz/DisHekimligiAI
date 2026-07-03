@@ -25,6 +25,11 @@ An AI-powered clinical training system for dental education. Students work throu
 │                              ├─ IRT 2PL ability estimation               │
 │                              └─ BKT mastery posteriors                   │
 │                                                                          │
+│  GET  /analytics/mastery-trajectory ──► MasteryTrajectoryService         │
+│  GET  /analytics/learning-curve     ──► LearningCurveService             │
+│  GET  /analytics/outcome-correlation ──► OutcomeCorrelationService       │
+│  GET  /instructor/cohort/mastery-heatmap ──► CohortAnalyticsService      │
+│                                                                          │
 │  /analytics · /quiz · /cases · /auth · /instructor · /admin             │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ SQLAlchemy 2 / psycopg3
@@ -232,9 +237,67 @@ An **ε-greedy exploration** policy (ε=0.10, configurable via `DENTAI_EXPLORATI
 
 ---
 
+## Research Analytics
+
+Four services added in Sprint 14B provide publication-grade analytics for JDE / Wiley venues. All endpoints require instructor or admin role unless noted.
+
+### Mastery Trajectory (`mastery_trajectory_service.py`)
+
+`GET /analytics/mastery-trajectory` (student-auth) replays every graded `QuizAnswer` for the authenticated student in chronological order and returns the BKT posterior P(L_n) time series per topic with **95% Wilson-score confidence intervals**:
+
+```
+CI_half = 1.96 × √( p × (1−p) / max(1, n) )
+lower   = max(0,  p − CI_half)
+upper   = min(1,  p + CI_half)
+```
+
+Response shape per topic: `{ topic_id, label, current_mastery, n_observations, points: [{n, mastery, ci_lower, ci_upper, correct, timestamp}] }`. Visualised in `frontend/app/student/analytics/page.tsx`.
+
+### Learning Curve Fitting (`learning_curve_service.py`)
+
+`GET /analytics/learning-curve` (student-auth) fits a parametric curve to each topic's cumulative-accuracy trajectory and projects the trial count to cross the 0.70 mastery threshold (capped at 200). Two models are competed via `scipy.optimize.curve_fit`; the higher-R² fit is returned:
+
+| Model | Equation | Reference |
+|---|---|---|
+| Exponential saturation | `acc(n) = L - (L - p0) × exp(-k × n)` | Anderson 1982 |
+| Power-law of learning | `acc(n) = L - b × n^(-c)` | Newell & Rosenbloom 1981 |
+
+Requires ≥3 observations per topic. Returns `model`, `params`, `r_squared`, `projected_trials_to_mastery`, and `fitted_curve` (observed range + projection horizon) per topic.
+
+### Cohort Mastery Heatmap (`cohort_analytics_service.py`)
+
+`GET /instructor/cohort/mastery-heatmap` returns a **student × topic BKT matrix** — each cell is the current P(L_n) in [0, 1]; `null` indicates the student has not yet attempted that topic. Also returns per-topic cohort averages and per-student average mastery and mastered-topic count. Rendered as a colour-coded heatmap in `frontend/app/instructor/cohort/page.tsx`.
+
+### Outcome Correlation (`outcome_correlation_service.py`)
+
+`GET /analytics/outcome-correlation` computes **Pearson r** between theory performance (MCQ + published OE quiz scores) and clinical performance (case simulation composite scores) across the student cohort. Provides construct-validity evidence — a significant positive r supports the claim that quiz and simulation measure a unified clinical competency construct. Displayed in `frontend/app/instructor/research/page.tsx`. Minimum 3 paired data points required per cohort.
+
+### Research Export (10 CSVs)
+
+`build_export_zip()` (`backend/app/services/research_export_service.py`) now bundles **10 KVKK-anonymised CSVs** (user IDs hashed with SHA-256 + deployment salt):
+
+| CSV | Content |
+|---|---|
+| `chat_logs` | Session chat history |
+| `quiz_attempts` | Attempt metadata |
+| `quiz_answers` | Per-answer grading |
+| `recommendation_snapshots` | 37-feature vectors + outcomes |
+| `mastery_states` | Current BKT posteriors |
+| `irt_parameters` | 2PL a, b per item |
+| `review_schedules` | SM-2 state per student/question |
+| `mastery_trajectories` | Full P(L_n) time series per (student, topic) |
+| `learning_curve_fits` | Model, params, R², projection per (student, topic) |
+| `outcome_correlation` | Cohort-level Pearson r with sample size |
+
+The research snapshot (`research_snapshot_service.py`) v2 schema adds an `analytics_summary` block containing BKT prior summary, cohort mastery distribution, and outcome correlation coefficient.
+
+---
+
 ## 3D Oral Cavity Simulator
 
 `frontend/components/OralSimulator/` implements an interactive intraoral viewer using **React Three Fiber 9.6.1** (React renderer for Three.js 0.160.0) with Drei 10.7.7 for higher-level primitives.
+
+**GLB model:** `backend/assets/models/oral_cavity_base.glb` (2.5 MB, CC-licensed — see `ATTRIBUTIONS.md`) is the base oral cavity mesh served at `GET /cases/oral-model`. When loaded, `<Center>` from Drei auto-centers the model bounding box at the scene origin. A procedural fallback (torus arch + extruded tooth boxes + bezier tongue) renders when the GLB is unavailable.
 
 **Scene setup:**
 
@@ -244,14 +307,25 @@ An **ε-greedy exploration** policy (ε=0.10, configurable via `DENTAI_EXPLORATI
   <directionalLight position={[2, 4, 3]} intensity={1.2} />
   <Environment preset="studio" />
   <OrbitControls enablePan={false} minDistance={0.8} maxDistance={2.5} />
-  {glbLoaded ? <primitive object={glb.scene} /> : <FallbackGeometry />}
+  {glbLoaded
+    ? <Center><primitive object={glb.scene} /></Center>
+    : <FallbackGeometry />}
   {revealedLesions.map(l => <LesionHighlight key={l.id} {...l} />)}
 </Canvas>
 ```
 
-The fallback geometry (rendered when no GLB model is loaded) is a procedural mesh: a torus for the dental arch, extruded tooth boxes at FDI-standard positions, and a bezier-curved tongue mesh.
+**Lesion coordinate system:** Origin at arch center, +Z anterior, +Y superior, ±X lateral. `LesionHighlight` renders a pulsing `<mesh>` sphere at each lesion's coordinates with a raycaster `onClick` handler. Position resolution order: `lesion.position` (case-defined override) → `DEFAULT_LESION_POSITIONS[region_id]` → `[0, 0, 0.2]`.
 
-**Lesion coordinate system:** Origin at arch center, +Z anterior, +Y superior, ±X lateral. Anatomical positions are hardcoded constants (e.g., `bukkal_mukoza_sag: [-0.35, 0.0, 0.05]`, `dil_ucu: [0, -0.12, 0.4]`). `LesionHighlight` renders a pulsing `<mesh>` sphere at these coordinates with a raycaster `onClick` handler.
+Anatomical regions covered by `DEFAULT_LESION_POSITIONS`:
+
+| Region group | Keys |
+|---|---|
+| Buccal mucosa | `bukkal_mukoza_sag`, `bukkal_mukoza_sol`, `bukkal_mukoza_eritroplaki` |
+| Tongue | `dil_ucu`, `dil_lateral`, `dil_dorsum` |
+| Palate | `damak`, `yumusak_damak` |
+| Gingiva | `dis_eti`, `dis_eti_ust`, `dis_eti_ust_arka`, `dis_eti_alt`, `dis_eti_alt_on`, `dis_eti_nekrotik` |
+| Lips | `dudak_cinvar`, `dudak_ici` |
+| Bone / posterior | `kemik_ekspoze_alt`, `tonsil` |
 
 **Reveal mechanism:** The same `beklenen_eylemler` (expected-actions) field that unlocks 2D clinical images also gates 3D lesion highlights. When `AssessmentEngine` marks an action as completed and the action key appears in a lesion's `reveal_on` list, the session state updates and the React component re-renders with the new overlay.
 
@@ -354,10 +428,10 @@ recommendation_model_versions                               (XGBoost bundle regi
 llm_interaction_logs                                        (every LLM API call)
 validator_audit_log                                         (MedGemma per-action)
 system_snapshots                                            (research reproducibility)
-research_exports                                            (KVKK-compliant anonymised bundles)
+research_exports                                            (KVKK-compliant anonymised bundles — 10 CSVs)
 ```
 
-Schema is managed by Alembic with 19+ versioned migrations from initial schema through quiz models, IRT tables, BKT mastery states, recommendation feature logging, and rubric versioning.
+Schema is managed by Alembic with versioned migrations covering initial schema, quiz models, IRT tables, BKT mastery states, recommendation feature logging, rubric versioning, and research analytics tables.
 
 ---
 

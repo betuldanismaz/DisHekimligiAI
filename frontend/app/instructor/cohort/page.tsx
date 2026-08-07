@@ -3,17 +3,10 @@
 import { useState, useEffect } from "react";
 import { instructorAPI, CohortHeatmapResponse, CohortStudentRow, CohortTopicMeta } from "@/lib/api";
 import InstructorRouteGuard from "@/components/instructor/InstructorRouteGuard";
-import { Users, ArrowLeft, Download } from "lucide-react";
+import { Users, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function cellColor(value: number | null): string {
-  if (value === null) return "bg-gray-100 text-gray-400";
-  if (value >= 0.7) return "bg-green-100 text-green-800";
-  if (value >= 0.4) return "bg-yellow-100 text-yellow-800";
-  return "bg-red-100 text-red-700";
-}
 
 function cellBg(value: number | null): string {
   if (value === null) return "#f3f4f6";
@@ -28,11 +21,9 @@ function cellBg(value: number | null): string {
 function HeatmapTable({
   students,
   topics,
-  threshold,
 }: {
   students: CohortStudentRow[];
   topics: CohortTopicMeta[];
-  threshold: number;
 }) {
   const [sortKey, setSortKey] = useState<"name" | "avg">("avg");
 
@@ -244,7 +235,6 @@ function CohortPageContent() {
               <HeatmapTable
                 students={data.students}
                 topics={data.topics}
-                threshold={data.mastery_threshold}
               />
             )}
 

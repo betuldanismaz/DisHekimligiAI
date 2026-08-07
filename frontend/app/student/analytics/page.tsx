@@ -11,7 +11,6 @@ import {
   LearningCurveTopic,
 } from "@/lib/api";
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
